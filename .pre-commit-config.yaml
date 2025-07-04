@@ -1,0 +1,246 @@
+# Configuration Pre-commit pour Heart Disease AI Diagnosis
+# Développé par Dady Akrou Cyrille - UQTR Data Science Graduate
+
+# Voir https://pre-commit.com pour plus d'informations
+# Voir https://pre-commit.com/hooks.html pour plus de hooks
+
+repos:
+  # Hooks généraux
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      # Vérifications de base
+      - id: trailing-whitespace
+        name: Supprimer les espaces en fin de ligne
+      - id: end-of-file-fixer
+        name: Assurer une ligne vide en fin de fichier
+      - id: check-yaml
+        name: Vérifier la syntaxe YAML
+      - id: check-toml
+        name: Vérifier la syntaxe TOML
+      - id: check-json
+        name: Vérifier la syntaxe JSON
+      - id: check-xml
+        name: Vérifier la syntaxe XML
+      - id: check-added-large-files
+        name: Vérifier les gros fichiers
+        args: ['--maxkb=1000']
+      - id: check-case-conflict
+        name: Vérifier les conflits de casse
+      - id: check-merge-conflict
+        name: Vérifier les marqueurs de merge
+      - id: debug-statements
+        name: Vérifier les instructions de debug
+      - id: check-executables-have-shebangs
+        name: Vérifier les shebangs des exécutables
+      - id: check-shebang-scripts-are-executable
+        name: Vérifier que les scripts avec shebang sont exécutables
+      - id: fix-byte-order-marker
+        name: Corriger les BOM UTF-8
+      - id: mixed-line-ending
+        name: Vérifier les fins de ligne mixtes
+        args: ['--fix=lf']
+
+  # Formatage Python avec Black
+  - repo: https://github.com/psf/black
+    rev: 23.12.1
+    hooks:
+      - id: black
+        name: Formatage du code Python avec Black
+        language_version: python3
+        args: ['--line-length=88', '--target-version=py38']
+
+  # Tri des imports avec isort
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        name: Tri des imports Python
+        args: ['--profile=black', '--line-length=88']
+
+  # Linting avec flake8
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.0.0
+    hooks:
+      - id: flake8
+        name: Linting Python avec flake8
+        args: [
+          '--max-line-length=88',
+          '--extend-ignore=E203,W503,E501',
+          '--max-complexity=10'
+        ]
+        additional_dependencies:
+          - flake8-docstrings
+          - flake8-import-order
+          - flake8-bugbear
+          - flake8-comprehensions
+          - flake8-simplify
+
+  # Vérification de sécurité avec bandit
+  - repo: https://github.com/pycqa/bandit
+    rev: 1.7.5
+    hooks:
+      - id: bandit
+        name: Analyse de sécurité Python
+        args: ['-r', 'app/', '-f', 'json', '-o', 'bandit-report.json']
+        exclude: tests/
+
+  # Vérification des types avec mypy
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.8.0
+    hooks:
+      - id: mypy
+        name: Vérification des types Python
+        args: ['--ignore-missing-imports', '--strict-optional']
+        additional_dependencies:
+          - types-requests
+          - types-PyYAML
+
+  # Audit des dépendances Python
+  - repo: https://github.com/pyupio/safety
+    rev: 2.3.5
+    hooks:
+      - id: safety
+        name: Audit de sécurité des dépendances
+        args: ['--json', '--output', 'safety-report.json']
+
+  # Vérification des secrets
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        name: Détection de secrets
+        args: ['--baseline', '.secrets.baseline']
+        exclude: |
+          (?x)^(
+              .*\.lock$|
+              .*\.min\.js$|
+              .*\.map$|
+              package-lock\.json$
+          )$
+
+  # Formatage des fichiers Markdown
+  - repo: https://github.com/executablebooks/mdformat
+    rev: 0.7.17
+    hooks:
+      - id: mdformat
+        name: Formatage Markdown
+        additional_dependencies:
+          - mdformat-gfm
+          - mdformat-black
+        args: ['--wrap=80']
+
+  # Vérification des liens dans la documentation
+  - repo: https://github.com/tcort/markdown-link-check
+    rev: v3.11.2
+    hooks:
+      - id: markdown-link-check
+        name: Vérification des liens Markdown
+        args: ['--config', '.markdown-link-check.json']
+
+  # Formatage YAML
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v4.0.0-alpha.8
+    hooks:
+      - id: prettier
+        name: Formatage YAML/JSON
+        types_or: [yaml, json]
+        args: ['--tab-width=2']
+
+  # Vérification des notebooks Jupyter
+  - repo: https://github.com/nbQA-dev/nbQA
+    rev: 1.7.1
+    hooks:
+      - id: nbqa-black
+        name: Formatage des notebooks Jupyter
+        args: ['--line-length=88']
+      - id: nbqa-isort
+        name: Tri des imports dans les notebooks
+        args: ['--profile=black']
+      - id: nbqa-flake8
+        name: Linting des notebooks Jupyter
+        args: ['--max-line-length=88', '--extend-ignore=E203,W503']
+
+  # Nettoyage des notebooks Jupyter
+  - repo: https://github.com/srstevenson/nb-clean
+    rev: 3.2.0
+    hooks:
+      - id: nb-clean
+        name: Nettoyage des notebooks Jupyter
+        args: ['--remove-empty-cells', '--preserve-cell-metadata']
+
+  # Hooks personnalisés pour le projet médical
+  - repo: local
+    hooks:
+      # Vérification des avertissements médicaux
+      - id: medical-warnings
+        name: Vérifier les avertissements médicaux
+        entry: python scripts/check_medical_warnings.py
+        language: system
+        files: '^app/.*\.py$'
+        pass_filenames: true
+
+      # Vérification de la conformité HIPAA
+      - id: hipaa-compliance
+        name: Vérifier la conformité HIPAA
+        entry: python scripts/check_hipaa_compliance.py
+        language: system
+        files: '^app/.*\.py$'
+        pass_filenames: true
+
+      # Tests rapides avant commit
+      - id: quick-tests
+        name: Tests rapides
+        entry: pytest tests/unit/ -x --tb=short
+        language: system
+        pass_filenames: false
+        stages: [commit]
+
+      # Vérification de la documentation
+      - id: docs-check
+        name: Vérifier la documentation
+        entry: python scripts/check_docs.py
+        language: system
+        files: '^(README|CONTRIBUTING|TECHNICAL_GUIDE)\.md$'
+        pass_filenames: true
+
+# Configuration globale
+default_stages: [commit, push]
+default_language_version:
+  python: python3.8
+
+# Exclusions globales
+exclude: |
+  (?x)^(
+      \.git/.*|
+      \.pytest_cache/.*|
+      __pycache__/.*|
+      \.coverage.*|
+      htmlcov/.*|
+      dist/.*|
+      build/.*|
+      \.venv/.*|
+      venv/.*|
+      env/.*|
+      node_modules/.*|
+      \.DS_Store|
+      Thumbs\.db|
+      \.idea/.*|
+      \.vscode/.*|
+      .*\.egg-info/.*|
+      \.tox/.*|
+      \.mypy_cache/.*
+  )$
+
+# Configuration pour les hooks spécifiques
+ci:
+  autofix_commit_msg: |
+    [pre-commit.ci] auto fixes from pre-commit.com hooks
+    
+    for more information, see https://pre-commit.ci
+  autofix_prs: true
+  autoupdate_branch: ''
+  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
+  autoupdate_schedule: weekly
+  skip: []
+  submodules: false

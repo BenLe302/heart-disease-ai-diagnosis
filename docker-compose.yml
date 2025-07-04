@@ -1,0 +1,278 @@
+# Docker Compose pour Heart Disease AI Diagnosis
+# Développé par Dady Akrou Cyrille - UQTR Data Science Graduate
+
+version: '3.8'
+
+services:
+  # Service principal - Application Streamlit
+  heart-disease-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - PYTHON_VERSION=3.11
+    container_name: heart-disease-ai
+    ports:
+      - "8501:8501"
+    environment:
+      - STREAMLIT_SERVER_HEADLESS=true
+      - STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+      - STREAMLIT_SERVER_PORT=8501
+      - STREAMLIT_SERVER_ADDRESS=0.0.0.0
+      - STREAMLIT_LOGGER_LEVEL=info
+      - PYTHONPATH=/app
+    volumes:
+      # Montage pour le développement (optionnel)
+      - ./app:/app/app:ro
+      - ./data:/app/data:ro
+      - ./notebooks:/app/notebooks:ro
+      # Volume pour les logs
+      - app-logs:/app/logs
+      # Volume pour les modèles (si sauvegardés)
+      - model-cache:/app/models
+    networks:
+      - heart-disease-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.heart-disease.rule=Host(`heart-disease.localhost`)"
+      - "traefik.http.services.heart-disease.loadbalancer.server.port=8501"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+
+  # Service Jupyter Lab (pour développement)
+  jupyter-lab:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: heart-disease-jupyter
+    ports:
+      - "8888:8888"
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+      - JUPYTER_TOKEN=heart-disease-dev
+      - PYTHONPATH=/app
+    volumes:
+      - ./notebooks:/app/notebooks
+      - ./data:/app/data
+      - ./app:/app/app
+      - jupyter-data:/home/jovyan/.jupyter
+    networks:
+      - heart-disease-network
+    command: >
+      bash -c "jupyter lab 
+        --ip=0.0.0.0 
+        --port=8888 
+        --no-browser 
+        --allow-root 
+        --NotebookApp.token='heart-disease-dev'
+        --NotebookApp.password=''
+        --notebook-dir=/app"
+    restart: unless-stopped
+    profiles:
+      - development
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.jupyter.rule=Host(`jupyter.localhost`)"
+      - "traefik.http.services.jupyter.loadbalancer.server.port=8888"
+
+  # Service Redis (pour cache et sessions)
+  redis:
+    image: redis:7-alpine
+    container_name: heart-disease-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+      - ./config/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    networks:
+      - heart-disease-network
+    restart: unless-stopped
+    command: redis-server /usr/local/etc/redis/redis.conf
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    profiles:
+      - production
+      - cache
+
+  # Service de monitoring (Prometheus)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: heart-disease-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - heart-disease-network
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    profiles:
+      - monitoring
+
+  # Service Grafana (pour visualisation des métriques)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: heart-disease-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=heart-disease-admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    networks:
+      - heart-disease-network
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    profiles:
+      - monitoring
+
+  # Service Nginx (reverse proxy)
+  nginx:
+    image: nginx:alpine
+    container_name: heart-disease-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./config/nginx/ssl:/etc/nginx/ssl:ro
+      - nginx-logs:/var/log/nginx
+    networks:
+      - heart-disease-network
+    restart: unless-stopped
+    depends_on:
+      - heart-disease-app
+    profiles:
+      - production
+
+  # Service de base de données (PostgreSQL pour logs et analytics)
+  postgres:
+    image: postgres:15-alpine
+    container_name: heart-disease-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=heart_disease_analytics
+      - POSTGRES_USER=heart_disease_user
+      - POSTGRES_PASSWORD=secure_password_change_me
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./config/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - heart-disease-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U heart_disease_user -d heart_disease_analytics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    profiles:
+      - production
+      - analytics
+
+  # Service de test automatisé
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test
+    container_name: heart-disease-tests
+    environment:
+      - TESTING=true
+      - PYTHONPATH=/app
+    volumes:
+      - ./tests:/app/tests:ro
+      - ./app:/app/app:ro
+      - test-reports:/app/test-reports
+    networks:
+      - heart-disease-network
+    command: >
+      bash -c "pytest tests/ 
+        --junitxml=/app/test-reports/junit.xml 
+        --cov=app 
+        --cov-report=html:/app/test-reports/htmlcov 
+        --cov-report=xml:/app/test-reports/coverage.xml"
+    profiles:
+      - testing
+
+# Réseaux
+networks:
+  heart-disease-network:
+    driver: bridge
+    name: heart-disease-network
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# Volumes persistants
+volumes:
+  # Données de l'application
+  app-logs:
+    name: heart-disease-app-logs
+  model-cache:
+    name: heart-disease-model-cache
+  
+  # Données Jupyter
+  jupyter-data:
+    name: heart-disease-jupyter-data
+  
+  # Données Redis
+  redis-data:
+    name: heart-disease-redis-data
+  
+  # Données de monitoring
+  prometheus-data:
+    name: heart-disease-prometheus-data
+  grafana-data:
+    name: heart-disease-grafana-data
+  
+  # Données de base
+  postgres-data:
+    name: heart-disease-postgres-data
+  
+  # Logs Nginx
+  nginx-logs:
+    name: heart-disease-nginx-logs
+  
+  # Rapports de tests
+  test-reports:
+    name: heart-disease-test-reports
+
+# Configuration des profils
+# Utilisation :
+# docker-compose up                          # Service principal uniquement
+# docker-compose --profile development up    # Avec Jupyter Lab
+# docker-compose --profile production up     # Avec Redis, Nginx, PostgreSQL
+# docker-compose --profile monitoring up     # Avec Prometheus et Grafana
+# docker-compose --profile testing up        # Pour les tests
+# docker-compose --profile cache up          # Avec Redis seulement
+# docker-compose --profile analytics up      # Avec PostgreSQL seulement
